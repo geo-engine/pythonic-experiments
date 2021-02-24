@@ -1,0 +1,17 @@
+[package]
+name = "pythonic-experiments"
+version = "0.1.0"
+authors = ["Christian Beilschmidt <beilschmidt@mathematik.uni-marburg.de>"]
+edition = "2018"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
+futures = "0.3"
+geoengine-datatypes = { git = "https://github.com/geo-engine/geoengine.git" }
+geoengine-operators = { git = "https://github.com/geo-engine/geoengine.git" }
+geoengine-services = { git = "https://github.com/geo-engine/geoengine.git" }
+serde = { version = "1.0", features = ["derive"] }
+snafu = "0.6"
+tokio = { version = "1.1", features = ["macros", "signal", "sync", "rt-multi-thread"] }
+typetag = "0.1"
