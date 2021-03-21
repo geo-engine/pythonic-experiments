@@ -1,4 +1,3 @@
-use crate::error::Result;
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use geoengine_datatypes::raster::{Grid2D, Pixel, Raster, RasterTile2D};
@@ -8,6 +7,7 @@ use geoengine_operators::engine::{
     RasterQueryProcessor, RasterResultDescriptor, TypedRasterQueryProcessor, VectorOperator,
 };
 use geoengine_operators::error::Error as GeoengineOperatorsError;
+use geoengine_operators::util::Result;
 use serde::{Deserialize, Serialize};
 
 /// An example operator that adds `x` to its input raster stream
@@ -30,7 +30,7 @@ impl RasterOperator for AddXOperator {
     fn initialize(
         mut self: Box<Self>,
         context: &dyn ExecutionContext,
-    ) -> Result<Box<InitializedRasterOperator>, GeoengineOperatorsError> {
+    ) -> Result<Box<InitializedRasterOperator>> {
         if !self.vector_sources.is_empty() {
             return Err(GeoengineOperatorsError::InvalidNumberOfVectorInputs {
                 expected: 0..1,
@@ -99,7 +99,7 @@ impl InitializedOperatorBase for InitializedAddXOperator {
 impl InitializedOperator<RasterResultDescriptor, TypedRasterQueryProcessor>
     for InitializedAddXOperator
 {
-    fn query_processor(&self) -> Result<TypedRasterQueryProcessor, GeoengineOperatorsError> {
+    fn query_processor(&self) -> Result<TypedRasterQueryProcessor> {
         let typed_raster_processor = self.raster_sources[0].query_processor()?;
         let add_value = self.params.x;
 
@@ -151,7 +151,7 @@ impl<T: Pixel> AddXProcessor<T> {
         }
     }
 
-    fn compute(&self, tile: RasterTile2D<T>) -> Result<RasterTile2D<T>, GeoengineOperatorsError> {
+    fn compute(&self, tile: RasterTile2D<T>) -> Result<RasterTile2D<T>> {
         let data: &[T] = &tile.grid_array.data;
 
         let new_data: Vec<T> = if let Some(no_data_value) = tile.grid_array.no_data_value {
@@ -189,14 +189,15 @@ impl<T: Pixel> RasterQueryProcessor for AddXProcessor<T> {
         &'a self,
         query: QueryRectangle,
         ctx: &'a dyn QueryContext,
-    ) -> BoxStream<'a, Result<RasterTile2D<Self::RasterType>, GeoengineOperatorsError>> {
-        self.raster
-            .query(query, ctx)
+    ) -> Result<BoxStream<'a, Result<RasterTile2D<Self::RasterType>>>> {
+        Ok(self
+            .raster
+            .query(query, ctx)?
             .map(move |raster_tile| {
                 let raster_tile = raster_tile?;
                 self.compute(raster_tile)
             })
-            .boxed()
+            .boxed())
     }
 }
 
@@ -255,6 +256,7 @@ mod tests {
                 },
                 &MockQueryContext::new(0),
             )
+            .unwrap()
             .map(|tile| tile.unwrap())
             .collect::<Vec<_>>()
             .await;

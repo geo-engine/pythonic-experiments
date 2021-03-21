@@ -1,11 +1,12 @@
-pub mod example_operator;
 pub mod error;
+pub mod example_operator;
 
 #[cfg(test)]
 mod tests {
-    use tokio::sync::oneshot;
-    use geoengine_services::server::start_server;
     use geoengine_services::error::Error;
+    use geoengine_services::error::Result;
+    use geoengine_services::server::start_server;
+    use tokio::sync::oneshot;
 
     /// Start the Geo Engine
     #[tokio::test]

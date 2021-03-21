@@ -13,7 +13,7 @@ list_limit = 20
 config_string = "postgresql://geoengine:geoengine@localhost:5432"
 
 [operators.gdal_source]
-raster_data_root_path = "operators/test-data/raster"
+raster_data_root_path = "data"
 
 [raster.tiling_specification]
 origin_coordinate_x = 0.0
