@@ -20,3 +20,6 @@ snafu = "0.6"
 tokio = { version = "1.1", features = ["macros", "signal", "sync", "rt-multi-thread"] }
 typetag = "0.1"
 warp = "0.3"
+pyo3 = "*"
+numpy = "*"
+ndarray = "*"
