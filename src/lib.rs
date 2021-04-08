@@ -1,5 +1,5 @@
 pub mod error;
-pub mod example_operator;
+// pub mod example_operator;
 pub mod example_pyop;
 
 #[cfg(test)]

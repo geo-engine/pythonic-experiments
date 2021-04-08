@@ -1,4 +1,9 @@
-use std::convert::TryInto;
+use std::{
+    convert::TryInto,
+    num,
+    sync::Arc,
+    sync::{Mutex, MutexGuard},
+};
 
 use futures::stream::BoxStream;
 use futures::StreamExt;
@@ -14,7 +19,11 @@ use serde::{Deserialize, Serialize};
 
 use ndarray::{s, stack, Array, Array1, Array2, Axis, Dim, OwnedArcRepr};
 use numpy::{IntoPyArray, PyArray, PyArray2, ToPyArray};
-use pyo3::types::{PyAny, PyModule};
+use pyo3::prelude::*;
+use pyo3::{
+    types::{PyAny, PyModule},
+    Py, Python,
+};
 
 /// An example operator that adds `x` to its input raster stream
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -150,64 +159,64 @@ where
 {
     raster: Box<dyn RasterQueryProcessor<RasterType = T>>,
     add_value: T,
+    pymod: Py<PyModule>,
 }
+
+unsafe impl<T> Send for PyProcessor<T> where T: Pixel {}
+unsafe impl<T> Sync for PyProcessor<T> where T: Pixel {}
 
 impl<T> PyProcessor<T>
 where
-    T: Pixel + numpy::Element,
+    T: Pixel,
 {
     pub fn new(raster: Box<dyn RasterQueryProcessor<RasterType = T>>, add_value: f64) -> Self {
+        // temporary py stuff
+        let gil = Python::acquire_gil();
+        let py = gil.python();
+
+        // das PyModule wird hier in ein Pyo3 Rust Objekt gepackt um als Feld im Struct abrufbar zu sein.
+        let py_mdl: Py<PyModule> =
+            PyModule::from_code(py, include_str!("ipca.py"), "activators.py", "activators")
+                .unwrap()
+                .into_py(py);
+
         Self {
             raster,
             add_value: T::from_(add_value),
+            pymod: py_mdl,
         }
     }
 
-    fn compute_py(&self, tile: RasterTile2D<T>) -> Result<RasterTile2D<T>> {
-        //register GIL
-        let gil = pyo3::Python::acquire_gil();
+    /// Wrapper Methode um eine Funktion aus dem Pythonmodul auszuführen.
+    fn add(&self, num: f64) {
+        let res: f64 = Python::with_gil(|py| {
+            self.pymod
+                .getattr(py, "add")
+                .unwrap()
+                .call1(py, (num,))
+                .unwrap()
+                .extract(py)
+                .unwrap()
+        });
+    }
 
-        //create a Pyhton object, which represents an instance of a Python interpreter
-        let py = gil.python();
+    /// Getter Methode um ein Feld im Pythonmodul abzufragen.
+    pub fn get(&self) -> f64 {
+        let res: f64 =
+            Python::with_gil(|py| self.pymod.getattr(py, "i").unwrap().extract(py).unwrap());
+        res
+    }
 
-        let py_ml: &PyModule = PyModule::from_code(
-            py,
-            include_str!("simple_pca.py"),
-            "filename.py",
-            "modulename",
-        )
-        .unwrap();
+    fn test(&self, tile: RasterTile2D<T>) -> Result<RasterTile2D<T>> {
+        let data: &[T] = &tile.grid_array.data;
 
-        // source tile data
-        let data = &tile.grid_array.data;
-        let subarr: Array2<T> = Array2::from_shape_vec((4, 4), data.to_owned())
-            .unwrap()
-            .to_owned();
-        let pythonized_data = PyArray2::from_owned_array(py, subarr);
-
-        let pca_res = py_ml.call("run_pca", (2, pythonized_data), None).unwrap();
-
-        let new_data: Vec<T> = pca_res
-            // .get_item(0)
-            // .unwrap()
-            .downcast::<PyArray2<T>>()
-            .unwrap()
-            .to_vec()
-            .unwrap();
-        // .to_owned_array();
-
-        // manipulate data
-        //                     (vvv--- hier wird nur nach vollständigen daten unterschieden---)
-        // let new_data: Vec<T> = data.iter().map(|&v| v + self.add_value).collect();
-
-        // return raster tile with manipulated data
         Ok(RasterTile2D::new(
             tile.time,
             tile.tile_position,
             tile.geo_transform(),
             Grid2D::new(
                 tile.grid_array.shape,
-                new_data,
+                data.to_owned(),
                 tile.grid_array.no_data_value,
             )?,
         ))
@@ -222,7 +231,6 @@ where
         let new_data: Vec<T> = if let Some(no_data_value) = tile.grid_array.no_data_value {
             data.iter()
                 .map(|&v| {
-                    // TODO: what about v + x = no data?
                     if v == no_data_value {
                         no_data_value
                     } else {
@@ -255,7 +263,6 @@ where
 {
     type RasterType = T;
 
-    // ! wie wird diese funktion getriggert?
     fn raster_query<'a>(
         &'a self,
         query: QueryRectangle,
@@ -263,11 +270,20 @@ where
     ) -> Result<BoxStream<'a, Result<RasterTile2D<Self::RasterType>>>> {
         Ok(self
             .raster
-            .query(query, ctx)? // ? hier werden einzelne kacheln aus dem ursprungs raster als neue subraster prozessiert
+            .query(query, ctx)?
             .map(move |raster_tile| {
-                let raster_tile = raster_tile?;
-                // self.compute(raster_tile) // * hier wird der operator angewendet
-                self.compute_py(raster_tile)
+                let raster_tile = raster_tile.unwrap();
+
+                // drum roll...
+
+                self.add(1.);
+
+                let res: f64 = self.get();
+                println!("{:?}", res);
+
+                //
+
+                self.test(raster_tile)
             })
             .boxed())
     }
@@ -286,8 +302,6 @@ mod tests {
 
     #[tokio::test]
     async fn simple_raster() {
-        // ! Frage: kompilierzeit verkürzen?
-        // ! Frage: wie sind die tiles orientiert, bzw. wie werden sie prozessiert? -> zeilenweise links nach rechts, unten nach oben?
         // ausgangs raster tile (pre-state)
         let raster_tile = RasterTile2D::new_with_tile_info(
             TimeInterval::default(),
