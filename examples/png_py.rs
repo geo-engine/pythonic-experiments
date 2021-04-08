@@ -66,11 +66,17 @@ async fn main() {
     // 4. define your output image size (in px)
 
     let request = Request::new(1024, 512);
+    // let request = Request::new(767, 510);
 
     // 5. define your query
 
     // …spatial
     let bbox = BoundingBox2D::new((-180., -90.).into(), (180., 90.).into()).unwrap();
+    // let bbox = BoundingBox2D::new(
+    //     (-802607.85, 3577980.78).into(),
+    //     (1498701.38, 5108186.39).into(),
+    // )
+    // .unwrap();
 
     // …temporal
     let time_interval = TimeInterval::new(
@@ -107,10 +113,6 @@ async fn main() {
 
     // 7. collect the whole stream of raster tiles into one PNG
 
-    // ! ipca =====================
-    // raster_stream_prep_ipca(query_processor, query_rect, query_ctx).await;
-    // ! ENDE =====================
-
     let png =
         raster_stream_to_png_bytes(query_processor, query_rect, query_ctx, request, colorizer)
             .await
@@ -133,13 +135,22 @@ fn create_ndvi_meta_data() -> GdalMetaDataRegular {
         time_format: "%Y-%m-%d".to_string(),
         params: GdalDataSetParameters {
             file_path: "data/modis_ndvi/MOD13A2_M_NDVI_%%%_START_TIME_%%%.TIFF".into(),
+            // file_path: "data/nas/mas_europe_2011_1200/20110601_1200.TIFF".into(),
             rasterband_channel: 1,
             geo_transform: GeoTransform {
                 origin_coordinate: (-180., 90.).into(),
+                // origin_coordinate: (-802607.84, 5108186.38).into(),
                 x_pixel_size: 0.1,
+                // x_pixel_size: 3000.4,
                 y_pixel_size: -0.1,
+                // y_pixel_size: -3000.4,
             },
             bbox: BoundingBox2D::new((-180., -90.).into(), (180., 90.).into()).unwrap(),
+            // bbox: BoundingBox2D::new(
+            //     (-802607.85, 3577980.78).into(),
+            //     (1498701.38, 5108186.39).into(),
+            // )
+            // .unwrap(),
             file_not_found_handling: FileNotFoundHandling::NoData,
             no_data_value: Some(0.),
         },
@@ -177,8 +188,6 @@ async fn raster_stream_to_png_bytes<T, C: QueryContext>(
 where
     T: Pixel,
 {
-    let py = pyo3::Python::acquire_gil().python();
-
     let tile_stream = processor.raster_query(query_rect, &query_ctx)?;
 
     let x_query_resolution = query_rect.bbox.size_x() / f64::from(request.width);
@@ -220,7 +229,3 @@ where
 
     Ok(output_tile.to_png(request.width, request.height, &colorizer)?)
 }
-// todo pcakmeans -> zwei bilder zu unterschiedlichen zeitpunkten gleichzeitig?
-// todo pyo3 in verbindung mit async überhaupt möglich? -> siehe pyo3 asyncio repo
-// todo hauptproblem: py kann nicht als referenz benutzt werden -> mapping der tiles nach python so nicht möglich
-// todo Rc<()> cannot be shared meldung
