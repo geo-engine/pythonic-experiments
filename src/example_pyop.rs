@@ -1,10 +1,3 @@
-use std::{
-    convert::TryInto,
-    num,
-    sync::Arc,
-    sync::{Mutex, MutexGuard},
-};
-
 use futures::stream::BoxStream;
 use futures::StreamExt;
 use geoengine_datatypes::raster::{Grid2D, Pixel, Raster, RasterTile2D};
@@ -162,12 +155,12 @@ where
     pymod: Py<PyModule>,
 }
 
-unsafe impl<T> Send for PyProcessor<T> where T: Pixel {}
-unsafe impl<T> Sync for PyProcessor<T> where T: Pixel {}
+// unsafe impl<T> Send for PyProcessor<T> where T: Pixel {}
+// unsafe impl<T> Sync for PyProcessor<T> where T: Pixel {}
 
 impl<T> PyProcessor<T>
 where
-    T: Pixel,
+    T: Pixel + numpy::Element,
 {
     pub fn new(raster: Box<dyn RasterQueryProcessor<RasterType = T>>, add_value: f64) -> Self {
         // temporary py stuff
@@ -207,8 +200,49 @@ where
         res
     }
 
-    fn test(&self, tile: RasterTile2D<T>) -> Result<RasterTile2D<T>> {
-        let data: &[T] = &tile.grid_array.data;
+    fn fit_tiles(&self, tile: RasterTile2D<T>) -> Result<RasterTile2D<T>> {
+        //
+
+        let data: Vec<T> = tile.grid_array.data.clone();
+        let ar: ndarray::Array2<T> = Array2::from_shape_vec((600, 600), data.to_owned())
+            .unwrap()
+            .to_owned();
+
+        let gil = Python::acquire_gil();
+        let py = gil.python();
+        let pythonized_data = PyArray2::from_owned_array(py, ar);
+
+        self.pymod
+            .as_ref(py)
+            .call("partial_fit_ipca", (pythonized_data,), None);
+
+        Ok(RasterTile2D::new(
+            tile.time,
+            tile.tile_position,
+            tile.geo_transform(),
+            Grid2D::new(tile.grid_array.shape, data, tile.grid_array.no_data_value)?,
+        ))
+    }
+
+    fn transform_tiles(&self, tile: RasterTile2D<T>) -> Result<RasterTile2D<T>> {
+        let data: Vec<T> = tile.grid_array.data.clone();
+        let ar: ndarray::Array2<T> = Array2::from_shape_vec((600, 600), data.to_owned())
+            .unwrap()
+            .to_owned();
+
+        let gil = Python::acquire_gil();
+        let py = gil.python();
+        let pythonized_data = PyArray2::from_owned_array(py, ar);
+
+        let new_data = self
+            .pymod
+            .as_ref(py)
+            .call("apply_ipca", (pythonized_data,), None)
+            .unwrap()
+            .downcast::<PyArray2<T>>()
+            .unwrap()
+            .to_vec()
+            .unwrap();
 
         Ok(RasterTile2D::new(
             tile.time,
@@ -216,7 +250,7 @@ where
             tile.geo_transform(),
             Grid2D::new(
                 tile.grid_array.shape,
-                data.to_owned(),
+                new_data,
                 tile.grid_array.no_data_value,
             )?,
         ))
@@ -268,24 +302,19 @@ where
         query: QueryRectangle,
         ctx: &'a dyn QueryContext,
     ) -> Result<BoxStream<'a, Result<RasterTile2D<Self::RasterType>>>> {
-        Ok(self
-            .raster
-            .query(query, ctx)?
-            .map(move |raster_tile| {
-                let raster_tile = raster_tile.unwrap();
+        let s1 = self.raster.query(query, ctx)?.map(move |raster_tile| {
+            let raster_tile = raster_tile.unwrap();
 
-                // drum roll...
+            self.fit_tiles(raster_tile)
+        });
+        let s2 = self.raster.query(query, ctx)?.map(move |raster_tile| {
+            let raster_tile = raster_tile.unwrap();
 
-                self.add(1.);
+            self.transform_tiles(raster_tile)
+        });
 
-                let res: f64 = self.get();
-                println!("{:?}", res);
-
-                //
-
-                self.test(raster_tile)
-            })
-            .boxed())
+        let res = s1.chain(s2).boxed();
+        Ok(res)
     }
 }
 

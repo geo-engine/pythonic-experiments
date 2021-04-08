@@ -74,7 +74,7 @@ async fn main() {
 
     // …temporal
     let time_interval = TimeInterval::new(
-        NaiveDate::from_ymd(2014, 3, 1).and_hms(0, 0, 0),
+        NaiveDate::from_ymd(2014, 6, 1).and_hms(0, 0, 0),
         NaiveDate::from_ymd(2014, 6, 1).and_hms(0, 0, 0),
     )
     .unwrap();
@@ -116,10 +116,10 @@ async fn main() {
             .await
             .unwrap();
 
-    // // 8. store png
+    // 8. store png
 
-    // let mut file = File::create("output.png").unwrap();
-    // file.write_all(&png).unwrap();
+    let mut file = File::create("output.png").unwrap();
+    file.write_all(&png).unwrap();
 }
 
 fn create_ndvi_meta_data() -> GdalMetaDataRegular {

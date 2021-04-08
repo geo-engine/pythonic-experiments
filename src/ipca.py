@@ -1,8 +1,7 @@
-from ast import In
-from distutils.ccompiler import new_compiler
 from sklearn.decomposition import IncrementalPCA
+import numpy as np
 
-ipca = IncrementalPCA(n_components=(50))
+ipca = IncrementalPCA(n_components=(500))
 started = False
 i = 0
 
@@ -39,3 +38,29 @@ def add(j):
 def get():
     global i
     return i
+
+
+def consume_tiles(tile):
+
+    print("\n\nprinting geoengine tile from within python:")
+    print(tile)
+
+
+def partial_fit_ipca(tile):
+
+    print("fitting")
+
+    global ipca
+    ipca.partial_fit(tile)
+
+
+def apply_ipca(tile):
+
+    global ipca
+
+    print("transforming")
+
+    tmp = ipca.transform(tile)
+    temp = ipca.inverse_transform(tmp).astype(np.uint8)
+
+    return temp

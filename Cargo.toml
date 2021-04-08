@@ -26,8 +26,4 @@ warp = "0.3"
 pyo3 = "*"
 # pyo3-asyncio = "*"
 numpy = "*"
-ndarray = "*"
-
-[dependencies.pyo3-asyncio]
-version = "0.13.0"
-features = ["tokio-runtime"]
+ndarray = "0.14"
