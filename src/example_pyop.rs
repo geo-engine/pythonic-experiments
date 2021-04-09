@@ -1,6 +1,10 @@
+use chrono::NaiveDate;
 use futures::stream::BoxStream;
 use futures::StreamExt;
-use geoengine_datatypes::raster::{Grid2D, Pixel, Raster, RasterTile2D};
+use geoengine_datatypes::{
+    primitives::{SpatialResolution, TimeInterval},
+    raster::{Grid2D, GridShape, Pixel, Raster, RasterTile2D},
+};
 use geoengine_operators::engine::{
     ExecutionContext, InitializedOperator, InitializedOperatorBase, InitializedRasterOperator,
     InitializedVectorOperator, QueryContext, QueryProcessor, QueryRectangle, RasterOperator,
@@ -17,6 +21,8 @@ use pyo3::{
     types::{PyAny, PyModule},
     Py, Python,
 };
+
+use geoengine_datatypes::primitives::{BoundingBox2D, Measurement, TimeGranularity, TimeStep};
 
 /// An example operator that adds `x` to its input raster stream
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -153,6 +159,7 @@ where
     raster: Box<dyn RasterQueryProcessor<RasterType = T>>,
     add_value: T,
     pymod: Py<PyModule>,
+    pymod_kmeans: Py<PyModule>,
 }
 
 // unsafe impl<T> Send for PyProcessor<T> where T: Pixel {}
@@ -173,10 +180,16 @@ where
                 .unwrap()
                 .into_py(py);
 
+        let py_mdl_kmeans: Py<PyModule> =
+            PyModule::from_code(py, include_str!("kmeans.py"), "activators.py", "activators")
+                .unwrap()
+                .into_py(py);
+
         Self {
             raster,
             add_value: T::from_(add_value),
             pymod: py_mdl,
+            pymod_kmeans: py_mdl_kmeans,
         }
     }
 
@@ -198,6 +211,43 @@ where
         let res: f64 =
             Python::with_gil(|py| self.pymod.getattr(py, "i").unwrap().extract(py).unwrap());
         res
+    }
+
+    fn kmeans(&self, tile_1: RasterTile2D<T>, tile_2: RasterTile2D<T>) -> Result<RasterTile2D<T>> {
+        println!("ddd");
+
+        let data_1: Vec<T> = tile_1.grid_array.data.clone();
+        let data_2: Vec<T> = tile_2.grid_array.data.clone();
+
+        let ar_1: ndarray::Array2<T> = Array2::from_shape_vec((600, 600), data_1.to_owned())
+            .unwrap()
+            .to_owned();
+
+        let ar_2: ndarray::Array2<T> = Array2::from_shape_vec((600, 600), data_2.to_owned())
+            .unwrap()
+            .to_owned();
+
+        let gil = Python::acquire_gil();
+        let py = gil.python();
+        let pythonized_data_1 = PyArray2::from_owned_array(py, ar_1);
+        let pythonized_data_2 = PyArray2::from_owned_array(py, ar_2);
+
+        self.pymod.as_ref(py).call(
+            "find_PCAKmeans",
+            (pythonized_data_1, pythonized_data_2),
+            None,
+        );
+
+        Ok(RasterTile2D::new(
+            tile_1.time,
+            tile_1.tile_position,
+            tile_1.geo_transform(),
+            Grid2D::new(
+                tile_1.grid_array.shape,
+                data_1,
+                tile_1.grid_array.no_data_value,
+            )?,
+        ))
     }
 
     fn fit_tiles(&self, tile: RasterTile2D<T>) -> Result<RasterTile2D<T>> {
@@ -302,19 +352,65 @@ where
         query: QueryRectangle,
         ctx: &'a dyn QueryContext,
     ) -> Result<BoxStream<'a, Result<RasterTile2D<Self::RasterType>>>> {
-        let s1 = self.raster.query(query, ctx)?.map(move |raster_tile| {
+        let time_interval_1 = TimeInterval::new(
+            NaiveDate::from_ymd(2014, 1, 1).and_hms(0, 0, 0),
+            NaiveDate::from_ymd(2014, 1, 1).and_hms(0, 0, 0),
+        )
+        .unwrap();
+
+        let time_interval_2 = TimeInterval::new(
+            NaiveDate::from_ymd(2014, 6, 1).and_hms(0, 0, 0),
+            NaiveDate::from_ymd(2014, 6, 1).and_hms(0, 0, 0),
+        )
+        .unwrap();
+
+        let bbox: BoundingBox2D =
+            BoundingBox2D::new((-180., -90.).into(), (180., 90.).into()).unwrap();
+
+        let spatial_resolution =
+            SpatialResolution::new(bbox.size_x() / 1024., bbox.size_y() / 512.).unwrap();
+
+        let qr_t1 = QueryRectangle {
+            bbox,
+            time_interval: time_interval_1,
+            spatial_resolution,
+        };
+
+        let qr_t2 = QueryRectangle {
+            bbox,
+            time_interval: time_interval_2,
+            spatial_resolution,
+        };
+
+        // * zwei streams erzeugen
+        let s1 = self.raster.query(qr_t1, ctx)?.map(move |raster_tile| {
             let raster_tile = raster_tile.unwrap();
-
-            self.fit_tiles(raster_tile)
+            raster_tile
         });
-        let s2 = self.raster.query(query, ctx)?.map(move |raster_tile| {
+
+        let s2 = self.raster.query(qr_t2, ctx)?.map(move |raster_tile| {
             let raster_tile = raster_tile.unwrap();
-
-            self.transform_tiles(raster_tile)
+            raster_tile
         });
 
-        let res = s1.chain(s2).boxed();
-        Ok(res)
+        // * streams zippen und dann über die paarweisen tiles arbeiten
+        Ok(s1
+            .zip(s2)
+            .map(move |(rt_1, rt_2)| {
+                println!("hello from .map");
+                self.kmeans(rt_1, rt_2)
+            })
+            .boxed())
+
+        // Ok(self
+        //     .raster
+        //     .query(qr_t1, ctx)?
+        //     .map(move |raster_tile| {
+        //         let raster_tile = raster_tile.unwrap();
+
+        //         self.fit_tiles(raster_tile)
+        //     })
+        //     .boxed())
     }
 }
 
