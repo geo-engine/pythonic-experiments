@@ -1,6 +1,6 @@
 pub mod error;
-// pub mod example_operator;
-pub mod example_pyop;
+pub mod ipca_operator;
+pub mod kmeans_operator;
 
 #[cfg(test)]
 mod tests {

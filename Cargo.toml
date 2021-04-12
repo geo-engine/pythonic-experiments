@@ -9,9 +9,6 @@ edition = "2018"
 [dependencies]
 chrono = "0.4"
 futures = "0.3"
-# geoengine-datatypes = { path = "/home/debian/fopra/205e899/datatypes" }
-# geoengine-operators = { path = "/home/debian/fopra/205e899/operators" }
-# geoengine-services = { path = "/home/debian/fopra/205e899/services" }
 geoengine-datatypes = { git = "https://github.com/geo-engine/geoengine.git" }
 geoengine-operators = { git = "https://github.com/geo-engine/geoengine.git" }
 geoengine-services = { git = "https://github.com/geo-engine/geoengine.git" }
@@ -24,6 +21,5 @@ tokio = { version = "1.1", features = ["macros", "signal", "sync", "rt-multi-thr
 typetag = "0.1"
 warp = "0.3"
 pyo3 = "*"
-# pyo3-asyncio = "*"
 numpy = "*"
-ndarray = "0.14"
+ndarray = "0.14" # dont go higher for now (11.04.2021)
